@@ -27,7 +27,6 @@ impl Board {
     }
 
     pub fn try_move(&mut self, player_move: &Move, player: Player) -> Result<(), InvalidMove> {
-        // first check if it's a valid move, return Ok(None) if not
         let piece =
             self.cell[player_move.from.y][player_move.from.x].ok_or(InvalidMove::NoPieceAtFrom)?;
         if piece.allegiance != player {
@@ -73,7 +72,7 @@ impl Board {
         Ok(())
     }
 
-    // Raycast a laser in a straight line until it hits a wall (return None) or a piece (return Some).
+    /// Raycast a laser in a straight line until it hits a wall (return None) or a piece (return Some).
     fn cast_laser(&self, laser: Laser) -> Option<(USizeVec2, Piece)> {
         self.cell[laser.position.y][laser.position.x]
             .map(|cell| (laser.position, cell))
