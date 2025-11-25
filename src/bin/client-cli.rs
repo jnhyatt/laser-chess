@@ -66,7 +66,7 @@ async fn main() {
     println!("⏳ Waiting for game to start...");
 
     // Await initial setup from server
-    let (mut board, player_order) = {
+    let (mut board, me) = {
         loop {
             let Some(Ok(Message::Text(text))) = ws_receiver.next().await else {
                 eprintln!("❌ Server closed connection");
@@ -85,37 +85,27 @@ async fn main() {
         }
     };
 
-    display_board(&board, player_order, false);
+    display_board(&board, me, None);
 
     // If we go first, do one turn before jumping into the loop (loop handles opponent first)
-    if player_order == Player::Player1 {
-        ws_sender
-            .send(player_turn(&mut board, player_order))
-            .await
-            .unwrap();
+    if me == Player::Player1 {
+        ws_sender.send(player_turn(&mut board, me)).await.unwrap();
     }
 
     // Repeatedly await opponent move, then prompt for and send player move
     loop {
         let message = ws_receiver.next().await.unwrap().unwrap();
         let opponent_move = opponent_turn(message);
-        let laser_board = board
-            .try_move_piece(&opponent_move, player_order.opponent())
-            .unwrap();
-        board
-            .try_move(&opponent_move, player_order.opponent())
-            .unwrap();
+        let laser_board = board.try_move_piece(&opponent_move, me.opponent()).unwrap();
+        board.try_move(&opponent_move, me.opponent()).unwrap();
 
-        display_board(&laser_board, player_order, true);
+        display_board(&laser_board, me, Some(me.opponent()));
 
         if board.game_over() {
             break;
         }
 
-        ws_sender
-            .send(player_turn(&mut board, player_order))
-            .await
-            .unwrap();
+        ws_sender.send(player_turn(&mut board, me)).await.unwrap();
         if board.game_over() {
             break;
         }
@@ -124,59 +114,55 @@ async fn main() {
     println!("🏁 Game over! Thanks for playing.");
 }
 
-fn display_board(board: &Board, player_order: Player, show_lasers: bool) {
+fn display_board(board: &Board, me: Player, laser: Option<Player>) {
     println!("\n  Current Board:");
-    let rows: Box<dyn Iterator<Item = (usize, &[Option<Piece>; 8])> + '_> = match player_order {
+    let rows: Box<dyn Iterator<Item = (usize, &[Option<Piece>; 8])> + '_> = match me {
         Player::Player1 => Box::new(board.cell.iter().enumerate().rev()),
         Player::Player2 => Box::new(board.cell.iter().enumerate()),
     };
-    let lasers = compute_lasers(board, player_order);
+    let lasers = laser.map(|player| compute_lasers(board, player));
     for (y, row) in rows {
         print!(" {} ", y + 1);
-        let cells: Box<dyn Iterator<Item = (&Option<Piece>, Option<char>)> + '_> =
-            match player_order {
-                Player::Player1 => Box::new(zip(row, lasers[y])),
-                Player::Player2 => Box::new(zip(row, lasers[y]).rev()),
-            };
+        let cells: Box<dyn Iterator<Item = (&Option<Piece>, Option<char>)> + '_> = match me {
+            Player::Player1 => Box::new(zip(row, lasers.map(|l| l[y]).unwrap_or_default())),
+            Player::Player2 => Box::new(zip(row, lasers.map(|l| l[y]).unwrap_or_default()).rev()),
+        };
         for (cell, laser) in cells {
-            match cell {
-                None if show_lasers => print!(" {}", laser.unwrap_or('.')),
-                None => print!(" ."),
-                Some(piece) => {
-                    #[rustfmt::skip]
-                    let symbol = match (player_order, &piece.kind, &piece.allegiance) {
-                        (_, PieceKind::King, Player::Player1) => '♚',
-                        (_, PieceKind::King, Player::Player2) => '♔',
-                        (_, PieceKind::Block { stacked: false }, Player::Player1) => '◛',
-                        (_, PieceKind::Block { stacked: true }, Player::Player1) => '◙',
-                        (_, PieceKind::Block { stacked: false }, Player::Player2) => '◡',
-                        (_, PieceKind::Block { stacked: true }, Player::Player2) => '○',
-                        (Player::Player1, PieceKind::OneSide(Orientation::NE), Player::Player1) => '◣',
-                        (Player::Player1, PieceKind::OneSide(Orientation::NW), Player::Player1) => '◢',
-                        (Player::Player1, PieceKind::OneSide(Orientation::SW), Player::Player1) => '◥',
-                        (Player::Player1, PieceKind::OneSide(Orientation::SE), Player::Player1) => '◤',
-                        (Player::Player1, PieceKind::OneSide(Orientation::NE), Player::Player2) => '◺',
-                        (Player::Player1, PieceKind::OneSide(Orientation::NW), Player::Player2) => '◿',
-                        (Player::Player1, PieceKind::OneSide(Orientation::SW), Player::Player2) => '◹',
-                        (Player::Player1, PieceKind::OneSide(Orientation::SE), Player::Player2) => '◸',
-                        (Player::Player2, PieceKind::OneSide(Orientation::NE), Player::Player1) => '◥',
-                        (Player::Player2, PieceKind::OneSide(Orientation::NW), Player::Player1) => '◤',
-                        (Player::Player2, PieceKind::OneSide(Orientation::SW), Player::Player1) => '◣',
-                        (Player::Player2, PieceKind::OneSide(Orientation::SE), Player::Player1) => '◢',
-                        (Player::Player2, PieceKind::OneSide(Orientation::NE), Player::Player2) => '◹',
-                        (Player::Player2, PieceKind::OneSide(Orientation::NW), Player::Player2) => '◸',
-                        (Player::Player2, PieceKind::OneSide(Orientation::SW), Player::Player2) => '◺',
-                        (Player::Player2, PieceKind::OneSide(Orientation::SE), Player::Player2) => '◿',
-                        (_, PieceKind::TwoSide(_), Player::Player1) => todo!(),
-                        (_, PieceKind::TwoSide(_), Player::Player2) => todo!(),
-                    };
-                    print!(" {symbol}");
-                }
-            }
+            let symbol = match cell {
+                None => '.',
+                Some(piece) => match (me, &piece.kind, &piece.allegiance) {
+                    (_, PieceKind::King, Player::Player1) => '♚',
+                    (_, PieceKind::King, Player::Player2) => '♔',
+                    (_, PieceKind::Block { stacked: false }, Player::Player1) => '◛',
+                    (_, PieceKind::Block { stacked: true }, Player::Player1) => '◙',
+                    (_, PieceKind::Block { stacked: false }, Player::Player2) => '◡',
+                    (_, PieceKind::Block { stacked: true }, Player::Player2) => '○',
+                    (Player::Player1, PieceKind::OneSide(Orientation::NE), Player::Player1) => '◣',
+                    (Player::Player1, PieceKind::OneSide(Orientation::NW), Player::Player1) => '◢',
+                    (Player::Player1, PieceKind::OneSide(Orientation::SW), Player::Player1) => '◥',
+                    (Player::Player1, PieceKind::OneSide(Orientation::SE), Player::Player1) => '◤',
+                    (Player::Player1, PieceKind::OneSide(Orientation::NE), Player::Player2) => '◺',
+                    (Player::Player1, PieceKind::OneSide(Orientation::NW), Player::Player2) => '◿',
+                    (Player::Player1, PieceKind::OneSide(Orientation::SW), Player::Player2) => '◹',
+                    (Player::Player1, PieceKind::OneSide(Orientation::SE), Player::Player2) => '◸',
+                    (Player::Player2, PieceKind::OneSide(Orientation::NE), Player::Player1) => '◥',
+                    (Player::Player2, PieceKind::OneSide(Orientation::NW), Player::Player1) => '◤',
+                    (Player::Player2, PieceKind::OneSide(Orientation::SW), Player::Player1) => '◣',
+                    (Player::Player2, PieceKind::OneSide(Orientation::SE), Player::Player1) => '◢',
+                    (Player::Player2, PieceKind::OneSide(Orientation::NE), Player::Player2) => '◹',
+                    (Player::Player2, PieceKind::OneSide(Orientation::NW), Player::Player2) => '◸',
+                    (Player::Player2, PieceKind::OneSide(Orientation::SW), Player::Player2) => '◺',
+                    (Player::Player2, PieceKind::OneSide(Orientation::SE), Player::Player2) => '◿',
+                    (_, PieceKind::TwoSide(_), Player::Player1) => todo!(),
+                    (_, PieceKind::TwoSide(_), Player::Player2) => todo!(),
+                },
+            };
+            let symbol = laser.unwrap_or(symbol);
+            print!(" {symbol}");
         }
         println!();
     }
-    if player_order == Player::Player1 {
+    if me == Player::Player1 {
         println!("    A B C D E F G H");
     } else {
         println!("    H G F E D C B A");
@@ -317,18 +303,18 @@ fn parse_move_input(input: &str) -> Option<Move> {
     }
 }
 
-fn player_turn(board: &mut Board, player_order: Player) -> Message {
+fn player_turn(board: &mut Board, me: Player) -> Message {
     loop {
         let player_move = prompt_move();
         // Validate move locally before sending
-        let laser_board = board.try_move_piece(&player_move, player_order);
-        if board.try_move(&player_move, player_order).is_ok() {
+        let laser_board = board.try_move_piece(&player_move, me);
+        if board.try_move(&player_move, me).is_ok() {
             // Send move to server
             let move_msg = ClientRequest::Move(player_move);
             let move_json = serde_json::to_string(&move_msg).unwrap();
 
             // Update local board state
-            display_board(&laser_board.unwrap(), player_order, true);
+            display_board(&laser_board.unwrap(), me, Some(me));
             break Message::text(move_json);
         } else {
             println!("❌ Invalid move, please try again.");
