@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 use bevy_math::{Dir2, USizeVec2, usizevec2};
+use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use laser_chess::{
     ClientRequest, ServerMessage,
@@ -8,18 +9,34 @@ use laser_chess::{
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
+#[derive(Parser, Debug)]
+#[command(name = "laser-chess-client")]
+#[command(about = "Laser Chess WebSocket Client", long_about = None)]
+struct Args {
+    /// Server hostname or IP address
+    #[arg(short = 'H', long, default_value = "laser-chess.onrender.com")]
+    host: String,
+
+    /// Server port
+    #[arg(short, long, default_value_t = 3000)]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
+
     println!("🎮 Laser Chess Debug Client");
     println!("=============================");
 
     // Get player name
     let player_name = prompt_for_input("Enter your username: ");
 
-    // Connect to server
-    println!("📡 Connecting to ws://localhost:3000/game...");
+    // Construct WebSocket URL
+    let ws_url = format!("ws://{}:{}/game", args.host, args.port);
+    println!("📡 Connecting to {}...", ws_url);
 
-    let (ws_stream, _) = match connect_async("ws://localhost:3000/game").await {
+    let (ws_stream, _) = match connect_async(&ws_url).await {
         Ok(result) => result,
         Err(e) => {
             eprintln!("❌ Failed to connect: {}", e);
@@ -105,7 +122,6 @@ async fn main() {
 
 fn display_board(board: &Board, opp_name: &str, my_turn: bool) {
     println!("\n  Current Board:");
-    println!("    A B C D E F G H");
     for (y, row) in board.cell.iter().enumerate() {
         print!(" {} ", 8 - y);
         for cell in row {
@@ -123,6 +139,10 @@ fn display_board(board: &Board, opp_name: &str, my_turn: bool) {
                         (PieceKind::OneSide(_), Player::Player2) => "◥",
                         (PieceKind::TwoSide(_), Player::Player1) => "◊",
                         (PieceKind::TwoSide(_), Player::Player2) => "♦",
+                        // ◤  ┌
+                        // ◥  ┐
+                        // ◣  └
+                        // ◢  ┘
                     };
                     print!(" {}", symbol);
                 }
@@ -130,6 +150,7 @@ fn display_board(board: &Board, opp_name: &str, my_turn: bool) {
         }
         println!();
     }
+    println!("    A B C D E F G H");
     println!();
 
     let turn_indicator = if my_turn {

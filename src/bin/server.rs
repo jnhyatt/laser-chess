@@ -8,13 +8,12 @@ use axum::{
     response::Response,
     routing::get,
 };
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tracing::{error, info, warn};
 
 use laser_chess::{
     ClientRequest, ServerMessage,
-    logic::{Board, Move, Piece, Player},
+    logic::{Board, Piece, Player},
 };
 
 #[tokio::main]
@@ -33,10 +32,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/game", get(websocket_handler))
         .with_state(matchmaking_tx);
 
-    // Start the server
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    info!("Server running on http://0.0.0.0:3000");
-    info!("WebSocket endpoint: ws://localhost:3000/game");
+    // Get port from environment variable, default to 3000
+    let port = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(3000);
+
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    info!("Server running on http://{}", addr);
 
     axum::serve(listener, app).await?;
 
@@ -137,8 +141,8 @@ async fn start_game([mut player1, mut player2]: [ConnectedPlayer; 2]) -> anyhow:
     let mut board_state = Board {
         cell: [[None; 8]; 8],
     };
-    board_state.cell[0][4] = Some(Piece::king(Player::Player2));
-    board_state.cell[7][3] = Some(Piece::king(Player::Player1));
+    board_state.cell[0][4] = Some(Piece::king(Player::Player1));
+    board_state.cell[7][3] = Some(Piece::king(Player::Player2));
 
     let player0_setup = player1.connection.send(Message::text(
         serde_json::to_string(&ServerMessage::InitialSetup {
