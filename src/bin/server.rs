@@ -13,7 +13,7 @@ use tracing::{error, info, warn};
 
 use laser_chess::{
     ClientRequest, ServerMessage,
-    logic::{Board, Piece, Player},
+    logic::{Board, Orientation, Piece, Player},
 };
 
 #[tokio::main]
@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     let port = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(3000);
+        .unwrap_or(10000);
 
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -142,7 +142,9 @@ async fn start_game([mut player1, mut player2]: [ConnectedPlayer; 2]) -> anyhow:
         cell: [[None; 8]; 8],
     };
     board_state.cell[0][4] = Some(Piece::king(Player::Player1));
+    board_state.cell[0][6] = Some(Piece::mirror(Player::Player1, Orientation::NE));
     board_state.cell[7][3] = Some(Piece::king(Player::Player2));
+    board_state.cell[7][1] = Some(Piece::mirror(Player::Player2, Orientation::SW));
 
     let player0_setup = player1.connection.send(Message::text(
         serde_json::to_string(&ServerMessage::InitialSetup {
@@ -234,18 +236,4 @@ async fn client_request(player: &mut ConnectedPlayer) -> anyhow::Result<ClientRe
         Some(Err(e)) => Err(anyhow::anyhow!("WebSocket error during game: {}", e)),
         None => Err(anyhow::anyhow!("Connection closed during game")),
     }
-}
-
-// Notify a player that their opponent disconnected
-async fn _notify_disconnect(_player: &mut WebSocket, _message: &str) -> anyhow::Result<()> {
-    // let disconnect_msg = GameMessage::GameOver {
-    //     winner: None,
-    //     reason: message.to_string(),
-    // };
-
-    // let json = serde_json::to_string(&disconnect_msg)?;
-    // player.send(Message::Text(json.into())).await?;
-    // player.close().await?;
-
-    Ok(())
 }

@@ -5,7 +5,7 @@ use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use laser_chess::{
     ClientRequest, ServerMessage,
-    logic::{Board, Chirality, Move, MoveKind, PieceKind, Player},
+    logic::{Board, Chirality, Move, MoveKind, Orientation, Piece, PieceKind, Player},
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -18,7 +18,7 @@ struct Args {
     host: String,
 
     /// Server port
-    #[arg(short, long, default_value_t = 3000)]
+    #[arg(short, long, default_value_t = 10000)]
     port: u16,
 }
 
@@ -33,7 +33,7 @@ async fn main() {
     let player_name = prompt_for_input("Enter your username: ");
 
     // Construct WebSocket URL
-    let ws_url = format!("ws://{}:{}/game", args.host, args.port);
+    let ws_url = format!("wss://{}/game", args.host);
     println!("📡 Connecting to {}...", ws_url);
 
     let (ws_stream, _) = match connect_async(&ws_url).await {
@@ -63,7 +63,7 @@ async fn main() {
     println!("⏳ Waiting for game to start...");
 
     // Await initial setup from server
-    let (mut board, opponent_name, player_order) = {
+    let (mut board, player_order) = {
         loop {
             let Some(Ok(Message::Text(text))) = ws_receiver.next().await else {
                 eprintln!("❌ Server closed connection");
@@ -72,26 +72,22 @@ async fn main() {
             if let Ok(ServerMessage::InitialSetup {
                 board: initial_board,
                 player_order,
-                opponent_name,
+                ..
             }) = serde_json::from_str::<ServerMessage>(&text)
             {
-                break (
-                    initial_board,
-                    opponent_name,
-                    Player::from_index(player_order).unwrap(),
-                );
+                break (initial_board, Player::from_index(player_order).unwrap());
             } else {
                 return;
             }
         }
     };
 
-    display_board(&board, &opponent_name, player_order == Player::Player1);
+    display_board(&board, player_order);
 
     // If we go first, do one turn before jumping into the loop (loop handles opponent first)
     if player_order == Player::Player1 {
         ws_sender
-            .send(player_turn(&mut board, player_order, &opponent_name))
+            .send(player_turn(&mut board, player_order))
             .await
             .unwrap();
     }
@@ -106,10 +102,10 @@ async fn main() {
             break;
         }
 
-        display_board(&board, &opponent_name, true);
+        display_board(&board, player_order);
 
         ws_sender
-            .send(player_turn(&mut board, player_order, &opponent_name))
+            .send(player_turn(&mut board, player_order))
             .await
             .unwrap();
         if board.game_over() {
@@ -120,29 +116,48 @@ async fn main() {
     println!("🏁 Game over! Thanks for playing.");
 }
 
-fn display_board(board: &Board, opp_name: &str, my_turn: bool) {
+fn display_board(board: &Board, player_order: Player) {
     println!("\n  Current Board:");
-    for (y, row) in board.cell.iter().enumerate() {
-        print!(" {} ", 8 - y);
-        for cell in row {
+    let rows: Box<dyn Iterator<Item = (usize, &[Option<Piece>; 8])> + '_> = match player_order {
+        Player::Player1 => Box::new(board.cell.iter().enumerate().rev()),
+        Player::Player2 => Box::new(board.cell.iter().enumerate()),
+    };
+    for (y, row) in rows {
+        print!(" {} ", y + 1);
+        let cells: Box<dyn Iterator<Item = &Option<Piece>> + '_> = match player_order {
+            Player::Player1 => Box::new(row.iter()),
+            Player::Player2 => Box::new(row.iter().rev()),
+        };
+        for cell in cells {
             match cell {
                 None => print!(" ."),
                 Some(piece) => {
-                    let symbol = match (&piece.kind, &piece.allegiance) {
-                        (PieceKind::King, Player::Player1) => "♔",
-                        (PieceKind::King, Player::Player2) => "♚",
-                        (PieceKind::Block { stacked: false }, Player::Player1) => "□",
-                        (PieceKind::Block { stacked: false }, Player::Player2) => "■",
-                        (PieceKind::Block { stacked: true }, Player::Player1) => "⧠",
-                        (PieceKind::Block { stacked: true }, Player::Player2) => "⧛",
-                        (PieceKind::OneSide(_), Player::Player1) => "◢",
-                        (PieceKind::OneSide(_), Player::Player2) => "◥",
-                        (PieceKind::TwoSide(_), Player::Player1) => "◊",
-                        (PieceKind::TwoSide(_), Player::Player2) => "♦",
-                        // ◤  ┌
-                        // ◥  ┐
-                        // ◣  └
-                        // ◢  ┘
+                    #[rustfmt::skip]
+                    let symbol = match (player_order, &piece.kind, &piece.allegiance) {
+                        (_, PieceKind::King, Player::Player1) => "♚",
+                        (_, PieceKind::King, Player::Player2) => "♔",
+                        (_, PieceKind::Block { stacked: false }, Player::Player1) => "◛",
+                        (_, PieceKind::Block { stacked: true }, Player::Player1) => "◙",
+                        (_, PieceKind::Block { stacked: false }, Player::Player2) => "◡",
+                        (_, PieceKind::Block { stacked: true }, Player::Player2) => "○",
+                        (Player::Player1, PieceKind::OneSide(Orientation::NE), Player::Player1) => "◣",
+                        (Player::Player1, PieceKind::OneSide(Orientation::NW), Player::Player1) => "◢",
+                        (Player::Player1, PieceKind::OneSide(Orientation::SW), Player::Player1) => "◥",
+                        (Player::Player1, PieceKind::OneSide(Orientation::SE), Player::Player1) => "◤",
+                        (Player::Player1, PieceKind::OneSide(Orientation::NE), Player::Player2) => "◺",
+                        (Player::Player1, PieceKind::OneSide(Orientation::NW), Player::Player2) => "◿",
+                        (Player::Player1, PieceKind::OneSide(Orientation::SW), Player::Player2) => "◹",
+                        (Player::Player1, PieceKind::OneSide(Orientation::SE), Player::Player2) => "◸",
+                        (Player::Player2, PieceKind::OneSide(Orientation::NE), Player::Player1) => "◥",
+                        (Player::Player2, PieceKind::OneSide(Orientation::NW), Player::Player1) => "◤",
+                        (Player::Player2, PieceKind::OneSide(Orientation::SW), Player::Player1) => "◣",
+                        (Player::Player2, PieceKind::OneSide(Orientation::SE), Player::Player1) => "◢",
+                        (Player::Player2, PieceKind::OneSide(Orientation::NE), Player::Player2) => "◹",
+                        (Player::Player2, PieceKind::OneSide(Orientation::NW), Player::Player2) => "◸",
+                        (Player::Player2, PieceKind::OneSide(Orientation::SW), Player::Player2) => "◺",
+                        (Player::Player2, PieceKind::OneSide(Orientation::SE), Player::Player2) => "◿",
+                        (_, PieceKind::TwoSide(_), Player::Player1) => todo!(),
+                        (_, PieceKind::TwoSide(_), Player::Player2) => todo!(),
                     };
                     print!(" {}", symbol);
                 }
@@ -150,15 +165,19 @@ fn display_board(board: &Board, opp_name: &str, my_turn: bool) {
         }
         println!();
     }
-    println!("    A B C D E F G H");
+    if player_order == Player::Player1 {
+        println!("    A B C D E F G H");
+    } else {
+        println!("    H G F E D C B A");
+    }
     println!();
 
-    let turn_indicator = if my_turn {
-        "Your".into()
-    } else {
-        format!("{}'s", opp_name)
-    };
-    println!("  {} turn", turn_indicator);
+    // let turn_indicator = if my_turn {
+    //     "Your".into()
+    // } else {
+    //     format!("{}'s", opp_name)
+    // };
+    // println!("  {} turn", turn_indicator);
 }
 
 fn parse_coordinate(coord: &str) -> Option<USizeVec2> {
@@ -183,14 +202,14 @@ fn parse_coordinate(coord: &str) -> Option<USizeVec2> {
     };
 
     let row = match row_char {
-        '1' => 7,
-        '2' => 6,
-        '3' => 5,
-        '4' => 4,
-        '5' => 3,
-        '6' => 2,
-        '7' => 1,
-        '8' => 0,
+        '1' => 0,
+        '2' => 1,
+        '3' => 2,
+        '4' => 3,
+        '5' => 4,
+        '6' => 5,
+        '7' => 6,
+        '8' => 7,
         _ => return None,
     };
 
@@ -253,7 +272,7 @@ fn parse_move_input(input: &str) -> Option<Move> {
     }
 }
 
-fn player_turn(board: &mut Board, player_order: Player, opponent_name: &str) -> Message {
+fn player_turn(board: &mut Board, player_order: Player) -> Message {
     loop {
         let player_move = prompt_move();
         // Validate move locally before sending
@@ -263,7 +282,7 @@ fn player_turn(board: &mut Board, player_order: Player, opponent_name: &str) -> 
             let move_json = serde_json::to_string(&move_msg).unwrap();
 
             // Update local board state
-            display_board(&board, opponent_name, false);
+            display_board(&board, player_order);
             break Message::text(move_json);
         } else {
             println!("❌ Invalid move, please try again.");

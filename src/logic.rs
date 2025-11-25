@@ -162,6 +162,13 @@ impl Piece {
         }
     }
 
+    pub fn mirror(allegiance: Player, orientation: Orientation) -> Self {
+        Self {
+            kind: PieceKind::OneSide(orientation),
+            allegiance,
+        }
+    }
+
     /// Reflect a laser off this piece. Returns the new direction if reflected, or the new piece
     /// state if the laser did not hit a reflective surface.
     fn reflect(&self, direction: CompassQuadrant) -> Result<CompassQuadrant, Option<Self>> {
