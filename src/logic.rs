@@ -26,7 +26,11 @@ impl Board {
             < 2
     }
 
-    pub fn try_move(&mut self, player_move: &Move, player: Player) -> Result<(), InvalidMove> {
+    pub fn try_move_piece(
+        mut self,
+        player_move: &Move,
+        player: Player,
+    ) -> Result<Self, InvalidMove> {
         let piece =
             self.cell[player_move.from.y][player_move.from.x].ok_or(InvalidMove::NoPieceAtFrom)?;
         if piece.allegiance != player {
@@ -56,6 +60,13 @@ impl Board {
                 });
             }
         }
+        Ok(self)
+    }
+
+    pub fn try_move(&mut self, player_move: &Move, player: Player) -> Result<(), InvalidMove> {
+        *self = self.try_move_piece(player_move, player)?;
+
+        // Now shoot the laser and blow crap up!!!!
         let laser = match player {
             Player::Player1 => Laser {
                 position: usizevec2(7, 0),
@@ -73,7 +84,7 @@ impl Board {
     }
 
     /// Raycast a laser in a straight line until it hits a wall (return None) or a piece (return Some).
-    fn cast_laser(&self, laser: Laser) -> Option<(USizeVec2, Piece)> {
+    pub fn cast_laser(&self, laser: Laser) -> Option<(USizeVec2, Piece)> {
         self.cell[laser.position.y][laser.position.x]
             .map(|cell| (laser.position, cell))
             .or_else(|| self.cast_laser(laser.advance()?))
@@ -86,10 +97,13 @@ impl Board {
     pub fn bounce_laser(&self, laser: Laser) -> Option<(USizeVec2, Option<Piece>)> {
         let (hit_coord, hit_piece) = self.cast_laser(laser)?; // We hit the wall
         match hit_piece.reflect(laser.direction) {
-            Ok(new_direction) => self.bounce_laser(Laser {
-                position: hit_coord,
-                direction: new_direction,
-            }),
+            Ok(new_direction) => self.bounce_laser(
+                Laser {
+                    position: hit_coord,
+                    direction: new_direction,
+                }
+                .advance()?,
+            ),
             Err(new_piece_state) => Some((hit_coord, new_piece_state)),
         }
     }
@@ -189,7 +203,7 @@ impl Piece {
 
     /// Reflect a laser off this piece. Returns the new direction if reflected, or the new piece
     /// state if the laser did not hit a reflective surface.
-    fn reflect(&self, direction: CompassQuadrant) -> Result<CompassQuadrant, Option<Self>> {
+    pub fn reflect(&self, direction: CompassQuadrant) -> Result<CompassQuadrant, Option<Self>> {
         match self.kind.reflect(direction) {
             Ok(new_direction) => Ok(new_direction),
             Err(destroyed_kind) => Err(destroyed_kind.map(|kind| Self {
@@ -272,7 +286,7 @@ pub struct Laser {
 }
 
 impl Laser {
-    fn advance(self) -> Option<Self> {
+    pub fn advance(self) -> Option<Self> {
         Some(Self {
             position: add_compass_quadrant(self.position, self.direction)?,
             direction: self.direction,
