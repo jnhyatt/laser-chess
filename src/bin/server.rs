@@ -8,6 +8,7 @@ use axum::{
     response::Response,
     routing::get,
 };
+use bevy_math::usizevec2;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tracing::{error, info, warn};
 
@@ -141,10 +142,27 @@ async fn start_game([mut player1, mut player2]: [ConnectedPlayer; 2]) -> anyhow:
     let mut board_state = Board {
         cell: [[None; 8]; 8],
     };
-    board_state.cell[0][4] = Some(Piece::king(Player::Player1));
-    board_state.cell[0][6] = Some(Piece::mirror(Player::Player1, Orientation::NE));
-    board_state.cell[7][3] = Some(Piece::king(Player::Player2));
-    board_state.cell[7][1] = Some(Piece::mirror(Player::Player2, Orientation::SW));
+    let pieces = {
+        use Orientation::*;
+        use Player::*;
+        [
+            (usizevec2(2, 0), Piece::two_sided(Player1, NW)),
+            (usizevec2(3, 0), Piece::block(Player1)),
+            (usizevec2(4, 0), Piece::king(Player1)),
+            (usizevec2(5, 0), Piece::block(Player1)),
+            (usizevec2(6, 0), Piece::mirror(Player1, NE)),
+            (usizevec2(3, 3), Piece::two_sided(Player1, NW)),
+            (usizevec2(3, 4), Piece::mirror(Player1, SW)),
+            (usizevec2(7, 3), Piece::mirror(Player1, SW)),
+            (usizevec2(7, 4), Piece::mirror(Player1, NW)),
+            (usizevec2(2, 5), Piece::mirror(Player1, NW)),
+            (usizevec2(2, 2), Piece::mirror(Player1, SW)),
+        ]
+    };
+    for (coord, piece) in pieces {
+        board_state.cell[coord.y][coord.x] = Some(piece);
+        board_state.cell[7 - coord.y][7 - coord.x] = Some(piece.opposing());
+    }
 
     let player0_setup = player1.connection.send(Message::text(
         serde_json::to_string(&ServerMessage::InitialSetup {

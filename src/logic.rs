@@ -194,10 +194,31 @@ impl Piece {
         }
     }
 
+    pub fn block(allegiance: Player) -> Self {
+        Self {
+            kind: PieceKind::Block { stacked: true },
+            allegiance,
+        }
+    }
+
     pub fn mirror(allegiance: Player, orientation: Orientation) -> Self {
         Self {
             kind: PieceKind::OneSide(orientation),
             allegiance,
+        }
+    }
+
+    pub fn two_sided(allegiance: Player, orientation: Orientation) -> Self {
+        Self {
+            kind: PieceKind::TwoSide(orientation),
+            allegiance,
+        }
+    }
+
+    pub fn opposing(self) -> Self {
+        Self {
+            kind: self.kind.mirrored(),
+            allegiance: self.allegiance.opponent(),
         }
     }
 
@@ -223,6 +244,14 @@ pub enum PieceKind {
 }
 
 impl PieceKind {
+    fn mirrored(self) -> Self {
+        match self {
+            x @ (PieceKind::King | PieceKind::Block { .. }) => x,
+            PieceKind::OneSide(orientation) => PieceKind::OneSide(orientation.mirrored()),
+            PieceKind::TwoSide(orientation) => PieceKind::TwoSide(orientation.mirrored()),
+        }
+    }
+
     fn reflect(&self, direction: CompassQuadrant) -> Result<CompassQuadrant, Option<Self>> {
         use CompassQuadrant::*;
         use Orientation::*;
@@ -262,6 +291,16 @@ pub enum Orientation {
 }
 
 impl Orientation {
+    fn mirrored(self) -> Self {
+        use Orientation::*;
+        match self {
+            NE => SW,
+            NW => SE,
+            SE => NW,
+            SW => NE,
+        }
+    }
+
     fn rotate(self, chirality: Chirality) -> Self {
         use Chirality::*;
         use Orientation::*;
