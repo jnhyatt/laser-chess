@@ -105,11 +105,12 @@ async fn main() {
         board
             .try_move(&opponent_move, player_order.opponent())
             .unwrap();
+
+        display_board(&laser_board, player_order, true);
+
         if board.game_over() {
             break;
         }
-
-        display_board(&laser_board, player_order, true);
 
         ws_sender
             .send(player_turn(&mut board, player_order))
@@ -132,12 +133,12 @@ fn display_board(board: &Board, player_order: Player, show_lasers: bool) {
     let lasers = compute_lasers(board, player_order);
     for (y, row) in rows {
         print!(" {} ", y + 1);
-        let cells: Box<dyn Iterator<Item = &Option<Piece>> + '_> = match player_order {
-            Player::Player1 => Box::new(row.iter()),
-            Player::Player2 => Box::new(row.iter().rev()),
-        };
-        let lasers = lasers[y];
-        for (cell, laser) in zip(cells, lasers) {
+        let cells: Box<dyn Iterator<Item = (&Option<Piece>, Option<char>)> + '_> =
+            match player_order {
+                Player::Player1 => Box::new(zip(row, lasers[y])),
+                Player::Player2 => Box::new(zip(row, lasers[y]).rev()),
+            };
+        for (cell, laser) in cells {
             match cell {
                 None if show_lasers => print!(" {}", laser.unwrap_or('.')),
                 None => print!(" ."),
@@ -210,14 +211,14 @@ fn compute_lasers(board: &Board, player: Player) -> [[Option<char>; 8]; 8] {
             };
             next
         } else {
-            let Some(next) = laser.advance() else {
-                break;
-            };
             result[laser.position.y][laser.position.x] = Some(match laser.direction {
                 _ if result[laser.position.y][laser.position.x].is_some() => '+',
                 CompassQuadrant::North | CompassQuadrant::South => '|',
                 CompassQuadrant::East | CompassQuadrant::West => '-',
             });
+            let Some(next) = laser.advance() else {
+                break;
+            };
             next
         };
     }
