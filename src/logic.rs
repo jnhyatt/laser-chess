@@ -33,7 +33,6 @@ impl Board {
         if piece.allegiance != player {
             return Err(InvalidMove::NotYourPiece);
         }
-        // Rotations are always valid
         match player_move.kind {
             MoveKind::Move(direction) => {
                 let to = add_compass_octant(player_move.from, direction)
@@ -44,13 +43,31 @@ impl Board {
                 self.cell[to.y][to.x] = self.cell[player_move.from.y][player_move.from.x];
                 self.cell[player_move.from.y][player_move.from.x] = None;
             }
-            MoveKind::Rotate(Chirality::Clockwise) => todo!(),
-            MoveKind::Rotate(Chirality::CounterClockwise) => todo!(),
+            MoveKind::Rotate(chirality) => {
+                let new_kind = match piece.kind {
+                    PieceKind::King | PieceKind::Block { .. } => {
+                        return Err(InvalidMove::CannotRotate);
+                    }
+                    PieceKind::OneSide(x) => PieceKind::OneSide(x.rotate(chirality)),
+                    PieceKind::TwoSide(x) => PieceKind::TwoSide(x.rotate(chirality)),
+                };
+                self.cell[player_move.from.y][player_move.from.x] = Some(Piece {
+                    kind: new_kind,
+                    allegiance: piece.allegiance,
+                });
+            }
         }
-        if let Some((hit_coord, new_piece_state)) = self.bounce_laser(Laser {
-            position: usizevec2(7, 0),
-            direction: CompassQuadrant::North,
-        }) {
+        let laser = match player {
+            Player::Player1 => Laser {
+                position: usizevec2(7, 0),
+                direction: CompassQuadrant::North,
+            },
+            Player::Player2 => Laser {
+                position: usizevec2(0, 7),
+                direction: CompassQuadrant::South,
+            },
+        };
+        if let Some((hit_coord, new_piece_state)) = self.bounce_laser(laser) {
             self.cell[hit_coord.y][hit_coord.x] = new_piece_state;
         }
         Ok(())
@@ -85,6 +102,7 @@ pub enum InvalidMove {
     NoPieceAtFrom,
     NotYourPiece,
     DestinationOccupied,
+    CannotRotate,
 }
 
 impl fmt::Display for InvalidMove {
@@ -96,6 +114,7 @@ impl fmt::Display for InvalidMove {
             InvalidMove::DestinationOccupied => {
                 write!(f, "The destination cell is already occupied")
             }
+            InvalidMove::CannotRotate => write!(f, "This piece cannot be rotated"),
         }
     }
 }
@@ -227,6 +246,23 @@ pub enum Orientation {
     NW,
     SE,
     SW,
+}
+
+impl Orientation {
+    fn rotate(self, chirality: Chirality) -> Self {
+        use Chirality::*;
+        use Orientation::*;
+        match (self, chirality) {
+            (NE, Clockwise) => SE,
+            (NE, CounterClockwise) => NW,
+            (NW, Clockwise) => NE,
+            (NW, CounterClockwise) => SW,
+            (SE, Clockwise) => SW,
+            (SE, CounterClockwise) => NE,
+            (SW, Clockwise) => NW,
+            (SW, CounterClockwise) => SE,
+        }
+    }
 }
 
 /// Describes where a laser is. It's a combination of a position and a direction.
