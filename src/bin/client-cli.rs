@@ -21,8 +21,12 @@ struct Args {
     host: String,
 
     /// Server port
-    #[arg(short, long, default_value_t = 10000)]
-    port: u16,
+    #[arg(short, long)]
+    port: Option<u16>,
+
+    /// Disable TLS (use ws:// instead of wss://)
+    #[arg(short, long)]
+    no_tls: bool,
 }
 
 #[tokio::main]
@@ -36,7 +40,9 @@ async fn main() {
     let player_name = prompt_for_input("Enter your username: ");
 
     // Construct WebSocket URL
-    let ws_url = format!("wss://{}/game", args.host);
+    let port = args.port.map_or(String::new(), |p| format!(":{}", p));
+    let proto = if args.no_tls { "ws" } else { "wss" };
+    let ws_url = format!("{}://{}{}/game", proto, args.host, port);
     println!("📡 Connecting to {}...", ws_url);
 
     let (ws_stream, _) = match connect_async(&ws_url).await {
@@ -128,33 +134,38 @@ fn display_board(board: &Board, me: Player, laser: Option<Player>) {
             Player::Player2 => Box::new(zip(row, lasers.map(|l| l[y]).unwrap_or_default()).rev()),
         };
         for (cell, laser) in cells {
+            use Orientation::*;
+            use PieceKind::*;
+            use Player::*;
             let symbol = match cell {
                 None => '.',
                 Some(piece) => match (me, &piece.kind, &piece.allegiance) {
-                    (_, PieceKind::King, Player::Player1) => '♚',
-                    (_, PieceKind::King, Player::Player2) => '♔',
-                    (_, PieceKind::Block { stacked: false }, Player::Player1) => '◛',
-                    (_, PieceKind::Block { stacked: true }, Player::Player1) => '◙',
-                    (_, PieceKind::Block { stacked: false }, Player::Player2) => '◡',
-                    (_, PieceKind::Block { stacked: true }, Player::Player2) => '○',
-                    (Player::Player1, PieceKind::OneSide(Orientation::NE), Player::Player1) => '◣',
-                    (Player::Player1, PieceKind::OneSide(Orientation::NW), Player::Player1) => '◢',
-                    (Player::Player1, PieceKind::OneSide(Orientation::SW), Player::Player1) => '◥',
-                    (Player::Player1, PieceKind::OneSide(Orientation::SE), Player::Player1) => '◤',
-                    (Player::Player1, PieceKind::OneSide(Orientation::NE), Player::Player2) => '◺',
-                    (Player::Player1, PieceKind::OneSide(Orientation::NW), Player::Player2) => '◿',
-                    (Player::Player1, PieceKind::OneSide(Orientation::SW), Player::Player2) => '◹',
-                    (Player::Player1, PieceKind::OneSide(Orientation::SE), Player::Player2) => '◸',
-                    (Player::Player2, PieceKind::OneSide(Orientation::NE), Player::Player1) => '◥',
-                    (Player::Player2, PieceKind::OneSide(Orientation::NW), Player::Player1) => '◤',
-                    (Player::Player2, PieceKind::OneSide(Orientation::SW), Player::Player1) => '◣',
-                    (Player::Player2, PieceKind::OneSide(Orientation::SE), Player::Player1) => '◢',
-                    (Player::Player2, PieceKind::OneSide(Orientation::NE), Player::Player2) => '◹',
-                    (Player::Player2, PieceKind::OneSide(Orientation::NW), Player::Player2) => '◸',
-                    (Player::Player2, PieceKind::OneSide(Orientation::SW), Player::Player2) => '◺',
-                    (Player::Player2, PieceKind::OneSide(Orientation::SE), Player::Player2) => '◿',
-                    (_, PieceKind::TwoSide(_), Player::Player1) => todo!(),
-                    (_, PieceKind::TwoSide(_), Player::Player2) => todo!(),
+                    (_, King, Player1) => '♚',
+                    (_, King, Player2) => '♔',
+                    (_, Block { stacked: false }, Player1) => '◛',
+                    (_, Block { stacked: true }, Player1) => '◙',
+                    (_, Block { stacked: false }, Player2) => '◡',
+                    (_, Block { stacked: true }, Player2) => '○',
+                    (Player1, OneSide(NE), Player1) => '◣',
+                    (Player1, OneSide(NW), Player1) => '◢',
+                    (Player1, OneSide(SW), Player1) => '◥',
+                    (Player1, OneSide(SE), Player1) => '◤',
+                    (Player1, OneSide(NE), Player2) => '◺',
+                    (Player1, OneSide(NW), Player2) => '◿',
+                    (Player1, OneSide(SW), Player2) => '◹',
+                    (Player1, OneSide(SE), Player2) => '◸',
+                    (Player2, OneSide(NE), Player1) => '◥',
+                    (Player2, OneSide(NW), Player1) => '◤',
+                    (Player2, OneSide(SW), Player1) => '◣',
+                    (Player2, OneSide(SE), Player1) => '◢',
+                    (Player2, OneSide(NE), Player2) => '◹',
+                    (Player2, OneSide(NW), Player2) => '◸',
+                    (Player2, OneSide(SW), Player2) => '◺',
+                    (Player2, OneSide(SE), Player2) => '◿',
+                    (_, TwoSide(NE | SW), Player1) => '\\',
+                    (_, TwoSide(NW | SE), Player1) => '/',
+                    (_, TwoSide(NE | SW), Player2) => '⋱',
+                    (_, TwoSide(NW | SE), Player2) => '⋰',
                 },
             };
             let symbol = laser.unwrap_or(symbol);
